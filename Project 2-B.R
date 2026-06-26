@@ -1,4 +1,4 @@
-# Importing packages
+# Load packages -----------------------------------------------------------
 library(dplyr)
 library(tidyr)
 library(tibble)
@@ -7,7 +7,7 @@ library(haven)
 library(stringr)
 library(readxl)
 
-# Reading raw datasets
+# Read raw SDTM datasets into a named list --------------------------------
 raw <- list(
     ae = read_xpt("SDTM xpt/AE.xpt"),
     cm = read_xpt("SDTM xpt/CM.xpt"),
@@ -51,7 +51,7 @@ raw <- list(
     zh = read_xpt("SDTM xpt/ZH.xpt"),
     zs = read_xpt("SDTM xpt/ZS.xpt"))
 
-# Read in the ADaM datasets
+# Read validation ADaM datasets for comparison 
 val <- list(
     adae = read_xpt("ADaM xpt/ADAE.xpt"),
     adsl = read_xpt("ADaM xpt/ADSL.xpt"),
@@ -59,20 +59,22 @@ val <- list(
     adtte = read_xpt("ADaM xpt/ADTTE.xpt"),
     adex = read_xpt("ADaM xpt/ADEX.xpt"))
 
-# ADaM ADSL Dataset ---------------------------------------------------------
+# ADaM ADSL ---------------------------------------------------------------
 adsl <- raw$dm %>%
+    # Derive actual treatment from EX
     inner_join(
         raw$ex %>% filter(!is.na(EXSTDTC), !is.na(EXTRT)) %>%
             group_by(USUBJID) %>%
             summarise(trt_act = case_when(
                 any(toupper(EXTRT) == "CMP-135", na.rm = TRUE) ~ "CMP-135",
-                any(toupper(EXTRT) == "PLACEBO", na.rm = TRUE) ~ "PLACEBO"), .groups = "drop"),
+                any(toupper(EXTRT) == "PLACEBO", na.rm = TRUE) ~ "Placebo"), .groups = "drop"),
         by = "USUBJID") %>%
+    # Treatment variables and age groups
     mutate(
         TRT01A = trt_act,
-        TRT01AN = case_when(TRT01A == "CMP-135" ~ 1, TRT01A == "PLACEBO" ~ 0),
-        TRT01P = case_when(toupper(ARM) == "CMP-135" ~ "CMP-135", toupper(ARM) == "PLACEBO" ~ "PLACEBO"),
-        TRT01PN = case_when(TRT01P == "CMP-135" ~ 1, TRT01P == "PLACEBO" ~ 0),
+        TRT01AN = case_when(TRT01A == "CMP-135" ~ 1, TRT01A == "Placebo" ~ 0, TRUE ~ NA_real_),
+        TRT01P = case_when(toupper(ARM) == "CMP-135" ~ "CMP-135", toupper(ARM) == "PLACEBO" ~ "Placebo"),
+        TRT01PN = case_when(TRT01P == "CMP-135" ~ 1, TRT01P == "Placebo" ~ 0, TRUE ~ NA_real_),
         AGERE1 = case_when(
             AGE >= 18 & AGE < 41 ~ "18-40", AGE >= 41 & AGE < 65 ~ "41-64",
             AGE >= 65 ~ ">=65"),
@@ -82,16 +84,19 @@ adsl <- raw$dm %>%
             AGE >= 65 ~ ">= 65"),
         AGEGR1N = case_when(AGE >= 18 & AGE < 41 ~ 1, AGE >= 41 & AGE < 65 ~ 2, AGE >= 65 ~ 3)) %>%
     select(-trt_act) %>%
+    # Randomization date from DS protocol milestone
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "PROTOCOL MILESTONE", toupper(EPOCH) == "SCREENING",
             toupper(DSTERM) == "RANDOMIZATION") %>%
             mutate(RANDDT = as.Date(DSSTDTC)) %>% select(USUBJID, RANDDT),
         by = "USUBJID") %>%
     mutate(ITTFL = case_when(!is.na(RANDDT) ~ "Y", TRUE ~ "N")) %>%
+    # Safety flag - at least one dose of treatment
     left_join(
         raw$ex %>% filter(!is.na(EXSTDTC), !is.na(EXTRT)) %>% distinct(USUBJID) %>% mutate(SAFFL = "Y"),
         by = "USUBJID") %>%
     mutate(SAFFL = case_when(is.na(SAFFL) ~ "N", TRUE ~ SAFFL)) %>%
+    # Remission status from ZH 
     left_join(
         raw$zh %>% filter(toupper(ZHTESTCD) == "DXRMS") %>%
             mutate(REMISSN = case_when(
@@ -101,6 +106,7 @@ adsl <- raw$dm %>%
             group_by(USUBJID) %>% slice(1) %>% ungroup() %>%
             select(USUBJID, REMISS = ZHORRES, REMISSN),
         by = "USUBJID") %>%
+    # Tumor assessment flag from TU
     left_join(
         raw$tu %>% filter(VISITNUM > 1, TUSPID == "CTSA", !is.na(TUORRES), trimws(TUORRES) != "") %>%
             distinct(USUBJID) %>% mutate(TUFL = "Y"),
@@ -108,6 +114,7 @@ adsl <- raw$dm %>%
     mutate(EFFL = case_when(
         SAFFL == "Y" & !is.na(REMISSN) & REMISSN > 0 & !is.na(TUFL) & TUFL == "Y" ~ "Y",
         TRUE ~ "N")) %>%
+    # First and last treatment dates from EX
     left_join(
         raw$ex %>% filter(!is.na(EXSTDTC), !is.na(EXTRT)) %>%
             mutate(EXSTDTC = as.Date(EXSTDTC)) %>%
@@ -124,6 +131,7 @@ adsl <- raw$dm %>%
         TRTDUR = case_when( !is.na(TRTSDT) & !is.na(TRTEDT) & TRTEDT >= TRTSDT ~
             as.numeric(TRTEDT - TRTSDT) + 1)) %>%
     mutate(STDSDT = as.Date(RANDDT), STDSDTC = format(RANDDT, "%Y-%m-%d")) %>%
+    # Study end date from DS
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "DISPOSITION EVENT", toupper(DSSCAT) == "STUDY PERIOD",
             toupper(EPOCH) == "STUDY PERIOD") %>%
@@ -133,6 +141,7 @@ adsl <- raw$dm %>%
         STDEDTC = format(STDEDT, "%Y-%m-%d"),
         STDDUR = case_when(
             !is.na(STDEDT) & !is.na(STDSDT) ~ as.numeric(STDEDT - STDSDT + 1))) %>%
+    # Survival follow-up end date from DS
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "DISPOSITION EVENT", toupper(DSSCAT) == "FOLLOW-UP",
             toupper(EPOCH) == "SURVIVAL FOLLOW-UP") %>%
@@ -141,6 +150,7 @@ adsl <- raw$dm %>%
     mutate(
         SFUEDTC = case_when(is.na(SFUEDTC) ~ "", TRUE ~ SFUEDTC),
         SFUEDT = as.Date(case_when(SFUEDTC == "" ~ NA_character_, TRUE ~ SFUEDTC))) %>%
+    # Death date and timing flag from DS
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "OTHER EVENT", toupper(DSSCAT) == "DEATH",
             toupper(EPOCH) %in% c("STUDY PERIOD", "SURVIVAL FOLLOW-UP")) %>%
@@ -154,6 +164,7 @@ adsl <- raw$dm %>%
             toupper(EPOCH) == "STUDY PERIOD" ~ "STD", TRUE ~ "SFU")) %>%
             select(USUBJID, DTHTMFL),
         by = "USUBJID") %>%
+    # Disposition reason codes
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "DISPOSITION EVENT",
             toupper(DSSCAT) %in% c("CMP-135", "PLACEBO"),
@@ -184,6 +195,7 @@ adsl <- raw$dm %>%
             mutate(DSDTC = as.Date(DSDTC)) %>%
             group_by(USUBJID) %>% summarise(TRTDCDT = min(DSDTC), .groups = "drop"),
         by = "USUBJID") %>%
+    # Disposition completion flags
     left_join(
         raw$ds %>% filter(toupper(DSCAT) == "DISPOSITION EVENT", toupper(DSSCAT) == "STUDY PERIOD",
             toupper(EPOCH) == "STUDY PERIOD", !is.na(DSTERM)) %>%
@@ -210,10 +222,12 @@ adsl <- raw$dm %>%
             distinct(USUBJID) %>% mutate(COMPLFL = "Y"),
         by = "USUBJID") %>%
     mutate(COMPLFL = case_when(is.na(COMPLFL) ~ "N", TRUE ~ COMPLFL)) %>%
+    # Survival follow-up flag from SUPPDS
     left_join(
         raw$suppds %>% filter(toupper(QNAM) == "DSFUYN") %>% select(USUBJID, SFUFL = QVAL),
         by = "USUBJID") %>%
     mutate(SFUFL = case_when(is.na(SFUFL) ~ "N", TRUE ~ SFUFL)) %>%
+    # Prior therapy dates: surgery (YP), radiotherapy (XR), systemic (CM)
     left_join(
         raw$yp %>% filter(toupper(YPCAT) == "PRIOR CANCER-RELATED SURGERY OR PROCEDURE",
             !is.na(YPENDTC), nchar(trimws(YPENDTC)) == 10) %>%
@@ -245,6 +259,7 @@ adsl <- raw$dm %>%
         PRSURGFL = case_when(is.na(PRSURGFL) ~ "N", TRUE ~ PRSURGFL),
         PRRADFL = case_when(!is.na(PRRADDT) ~ "Y", TRUE ~ "N"),
         PRSYSFL = case_when(!is.na(PRSYSDT) ~ "Y", TRUE ~ "N")) %>%
+    # Baseline weight (last of visits 1-2)
     left_join(
         raw$vs %>% filter(toupper(VSTESTCD) == "WEIGHT", VISITNUM %in% c(1, 2),
             VSSTRESN > 0, !is.na(VSDTC)) %>%
@@ -253,6 +268,7 @@ adsl <- raw$dm %>%
             group_by(USUBJID) %>% slice_tail(n = 1) %>% ungroup() %>%
             select(USUBJID, BWT = VSSTRESN),
         by = "USUBJID") %>%
+    # Baseline height (visit 1)
     left_join(
         raw$vs %>% filter(toupper(VSTESTCD) == "HEIGHT", VISITNUM == 1,
             VSSTRESN > 0, !is.na(VSDTC)) %>%
@@ -260,12 +276,14 @@ adsl <- raw$dm %>%
             arrange(USUBJID, VISITNUM, VSDTC) %>%
             group_by(USUBJID) %>% slice_tail(n = 1) %>% ungroup() %>%
             select(USUBJID, BHT = VSSTRESN), by = "USUBJID") %>%
+    # Baseline ECOG (last of visits 1-2)
     left_join(
         raw$qs %>% filter(toupper(QSTESTCD) == "ECOG", VISITNUM %in% c(1, 2), QSSTRESN >= 0) %>%
             mutate(QSDTC = as.Date(QSDTC)) %>%
             arrange(USUBJID, VISITNUM, QSDTC) %>%
             group_by(USUBJID) %>% 
             summarise(BECOG = last(QSSTRESN), .groups = "drop"), by = "USUBJID") %>%
+    # CA-125 responder flag from ZH
     left_join(
         raw$zh %>% filter(toupper(trimws(ZHTESTCD)) == "RSP125YN") %>%
             mutate(RSP125 = case_when(toupper(trimws(ZHORRES)) == "Y" ~ "Y", TRUE ~ "N")) %>%
@@ -273,6 +291,7 @@ adsl <- raw$dm %>%
     mutate(
         RSP125 = case_when(is.na(RSP125) ~ NA_character_, TRUE ~ RSP125),
         CA125FL = case_when(SAFFL == "Y" & !is.na(RSP125) & RSP125 == "Y" ~ "Y", TRUE ~ "N")) %>%
+    # Histopathology type and subtype from ZH
     left_join(
         raw$zh %>% filter(toupper(ZHTESTCD) == "HPATHTYP") %>%
             select(USUBJID, HPATHTYP = ZHORRES), by = "USUBJID") %>%
@@ -281,6 +300,7 @@ adsl <- raw$dm %>%
             group_by(USUBJID) %>% slice(1) %>% ungroup() %>%
             select(USUBJID, HSUBTYP = ZHORRES), by = "USUBJID") %>%
     mutate(HSUBTYP = case_when(is.na(HSUBTYP) ~ "", TRUE ~ HSUBTYP)) %>%
+    # Follow-up period duration and death period classification
     mutate(across(c(DTHDT, SFUEDT, STDEDT, RANDDT), as.Date)) %>%
     mutate(FPDUR = case_when(
         !is.na(DTHDT) & !is.na(TRTSDT) ~ as.numeric(DTHDT - TRTSDT) + 1,
@@ -291,22 +311,10 @@ adsl <- raw$dm %>%
         !is.na(DTHDT) & DTHTMFL == "SFU" ~ "SURVIVAL FOLLOW-UP PERIOD",
         TRUE ~ ""))
 
-for (v in c("RANDDT", "TRTSDT", "TRTEDT", "TRTDCDT",
-            "STDSDT", "STDEDT", "SFUEDT", "DTHDT", "PRTXDT")) {
-    attr(adsl[[v]], "format.sas") <- "IS8601DA"}
+adsl <- adsl %>% select(names(val$adsl))
 
-adsl <- adsl %>%
-    select(
-        STUDYID, USUBJID, SUBJID, SITEID, INVNAM, INVID,
-        AGE, AGEU, AGEGR1, AGEGR1N, SEX, RACE, ETHNIC, COUNTRY, ARM, ARMCD,
-        TRT01P, TRT01PN, TRT01A, TRT01AN, ITTFL, SAFFL, EFFL, CA125FL,
-        TRTDCFL, COMPLFL, STDDCFL, SFUDCFL, SFUFL, DTHFL, RANDDT, TRTSDTC, 
-        TRTSDT, TRTEDTC, TRTEDT, TRTDCDT, STDSDTC, STDSDT, STDEDTC, STDEDT, 
-        SFUEDTC, SFUEDT, DTHDT, TRTDUR, STDDUR, FPDUR, DTHPER, TRTDCRS, 
-        STDDCRS, DTHDCRS, PRTXDT, PRTXDUR, PRSURGFL, PRRADFL, PRSYSFL,
-        BWT, BHT, BECOG, REMISS, REMISSN, RSP125, HPATHTYP, HSUBTYP)
-
-# ADaM ADAE Dataset ---------------------------------------------------------
+# ADaM ADAE ---------------------------------------------------------------
+# Pivot SUPPAE supplemental data wide by QNAM
 suppae_w <- raw$suppae %>%
     select(STUDYID, RDOMAIN, USUBJID, IDVAR, IDVARVAL, QNAM, QVAL) %>%
     mutate(QNAM = na_if(QNAM, "")) %>%
@@ -314,13 +322,15 @@ suppae_w <- raw$suppae %>%
     pivot_wider(names_from = QNAM, values_from = QVAL)
 
 adae <- raw$ae %>%
-    select(STUDYID, USUBJID, DOMAIN, AESEQ, AETERM, AEMODIFY, AEDECOD, AEBODSYS,
-           AESTDTC, AEENDTC, AESTRTPT, AEENRTPT,
-           AESER, AEREL, AERELNST, AETOXGR, AEACN, AEACNOTH, AECONTRT,
-           AESDTH, AESLIFE, AESHOSP, AESDISAB, AESCONG, AESMIE) %>%
+    select(STUDYID, USUBJID, DOMAIN, AESEQ, AETERM, AEMODIFY, AEDECOD, 
+        AEBODSYS, AESTDTC, AEENDTC, AESTRTPT, AEENRTPT, AESER, AEREL, 
+        AERELNST, AETOXGR, AEACN, AEACNOTH, AECONTRT, AESDTH, AESLIFE, 
+        AESHOSP, AESDISAB, AESCONG, AESMIE) %>%
     left_join(adsl, by = c("STUDYID", "USUBJID")) %>%
+    # Derive analysis dates, study day relative to first treatment, TEAE flag
     mutate(
-        SRCDOM = DOMAIN, SRCSEQ = AESEQ,
+        SRCDOM = DOMAIN, 
+        SRCSEQ = AESEQ,
         AESDT = as.Date(substr(AESTDTC, 1, 10)),
         AEEDT = as.Date(substr(AEENDTC, 1, 10)),
         AEST_FULL = nchar(substr(AESTDTC, 1, 10)) == 10,
@@ -339,8 +349,8 @@ adae <- raw$ae %>%
     left_join(
         suppae_w %>% filter(RDOMAIN == "AE") %>%
             mutate(AESEQ = as.numeric(IDVARVAL)) %>%
-            select(-any_of("AERELNST")),
-        by = c("STUDYID", "USUBJID", "AESEQ")) %>%
+            select(-any_of("AERELNST")), by = c("STUDYID", "USUBJID", "AESEQ")) %>%
+    # Combine multiple causality and action-taken records from SUPPAE
     mutate(
         AERELOTH = case_when(
             AERELNST == "MULTIPLE" & !is.na(AERELNS1) & !is.na(AERELNS2) ~
@@ -358,30 +368,21 @@ adae <- raw$ae %>%
                 TRUE ~ "NONE"),
         AETRTOTH = case_when(is.na(AETRTOTH) ~ "", TRUE ~ AETRTOTH))
 
+# Ensure remaining variables exist
 adae <- adae %>%
-    mutate(AEDTHDTC = NA_character_, DTHAUTYN = NA_character_,
-        AEHDTC = case_when(is.na(AEHDTC) ~ "", TRUE ~ as.character(AEHDTC)))
+    mutate(AEDTHDTC = "", DTHAUTYN = "",
+    AEHDTC = case_when(is.na(AEHDTC) ~ "", TRUE ~ as.character(AEHDTC)))
 
-attr(adae$AESDT, "format.sas") <- "IS8601DA"
-attr(adae$AEEDT, "format.sas") <- "IS8601DA"
+adae <- adae %>% select(names(val$adae))
 
-adae <- adae %>%
-    select(
-        STUDYID, USUBJID, SUBJID, SITEID, TRT01P, TRT01PN, TRT01A, TRT01AN,
-        REMISS, REMISSN, ITTFL, SAFFL, EFFL, CA125FL, TRTDCFL, COMPLFL, 
-        STDDCFL, SFUDCFL, SFUFL, SRCDOM, SRCSEQ, AETERM, AEMODIFY, AEDECOD, 
-        AEBODSYS, TRTSDT, TRTSDTC, TRTEDT, TRTEDTC, AESTDTC, AESTRTPT, 
-        AEENDTC, AEENRTPT, AESDT, AEEDT, AESDY, AESER, AEREL, AERELOTH, 
-        AETOXGR, AETOXGRN, AEACN, AETRTOTH, AESDTH, AEDTHDTC, DTHAUTYN, 
-        AESLIFE, AESHOSP, AEHDTC, AESDISAB, AESCONG, AESMIE, TRTEM, INVNAM, 
-        INVID, AGE, AGEU, AGEGR1, AGEGR1N, SEX, RACE, ETHNIC, COUNTRY, RANDDT)
-
-# ADaM ADLBSI Dataset -------------------------------------------------------
+# ADaM ADLBSI - Lab Safety (SI) Analysis Dataset  -------------------------
+# Read supplemental lab toxicity grade from SUPPLE
 tox <- raw$supplb %>%
     filter(QNAM == "LBTOXGR1") %>%
     mutate(LBSEQ = as.numeric(IDVARVAL)) %>%
     select(USUBJID, LBSEQ, LBTOXGR1 = QVAL)
 
+# Helper to format numeric lab ranges (strip trailing zeros)
 fmt <- function(x) {
     case_when(!is.na(x) ~ gsub("\\.?0+$", "", trimws(format(x, scientific = FALSE))), TRUE ~ "")}
 
@@ -391,6 +392,8 @@ adlbsi <- raw$lb %>%
     left_join(tox, by = c("USUBJID", "LBSEQ")) %>%
     left_join(adsl, by = "USUBJID") %>%
     mutate(
+        SRCVAR = "LBSTRESN",
+        # Build PARAM
         PARAM = case_when(
             is.na(LBSTRESU) | LBSTRESU == "" ~ paste0(trimws(LBCAT), "|", trimws(LBTEST)),
             TRUE ~ paste0(trimws(LBCAT), "|", trimws(LBTEST), " (", trimws(LBSTRESU), ")")),
@@ -412,10 +415,12 @@ adlbsi <- raw$lb %>%
         ONTRTFL = case_when(
             !is.na(ADT) & !is.na(TRTSDT) & !is.na(TRTEDT) & ADT >= TRTSDT & ADT <= TRTEDT ~ "Y",
             TRUE ~ "")) %>%
+    # Baseline eligibility
     mutate(BASEELIG = case_when(
         !is.na(ADTC) & ADTC != "" & !is.na(TRTSDTC) & TRTSDTC != "" & ADT <= TRTSDT &
             (!is.na(AVAL) | (!is.na(AVALC) & AVALC != "")) ~ "Y", TRUE ~ "")) %>%
     group_by(USUBJID, PARAM) %>%
+    # Find baseline date
     mutate(
         pre_dt = suppressWarnings(max(ADT[BASEELIG == "Y" & ADT < TRTSDT], na.rm = TRUE)),
         on_dt = suppressWarnings(max(ADT[BASEELIG == "Y" & ADT == TRTSDT], na.rm = TRUE)),
@@ -428,6 +433,7 @@ adlbsi <- raw$lb %>%
     ungroup() %>%
     mutate(ABLFL = case_when(!is.na(basedt) & ADT == basedt & LBSEQ == max_bs ~ "Y", TRUE ~ "")) %>%
     select(-pre_dt, -on_dt, -basedt, -max_bs) %>%
+    # Carry baseline values forward across all records per USUBJID/PARAM
     group_by(USUBJID, PARAM) %>%
     mutate(
         BASE = case_when(ABLFL == "Y" ~ LBSTRESN, TRUE ~ NA_real_),
@@ -437,15 +443,18 @@ adlbsi <- raw$lb %>%
         BASEC = case_when(any(ABLFL == "Y" & !is.na(BASEC) & BASEC != "") ~
             first(BASEC[ABLFL == "Y" & !is.na(BASEC) & BASEC != ""]), TRUE ~ "")) %>%
     ungroup() %>%
+    # Change and percent change from baseline
     mutate(
         CHG = case_when(!is.na(AVAL) & !is.na(BASE) ~ AVAL - BASE),
         PCHG = case_when(!is.na(AVAL) & !is.na(BASE) & BASE != 0 ~ (AVAL - BASE) / BASE * 100)) %>%
+    # Combine toxicity grades from LB and SUPPLE, extract numeric grade and direction
     mutate(
         tox_final = case_when(!is.na(LBTOXGR) & LBTOXGR != "" ~ LBTOXGR,
             !is.na(LBTOXGR1) & LBTOXGR1 != "" ~ LBTOXGR1, TRUE ~ ""),
         ATOXGR = case_when(tox_final != "" ~ str_extract(tox_final, "[0-9]+"), TRUE ~ ""),
         ATOXDIR = case_when(tox_final != "" ~ str_extract(tox_final, "[A-Za-z]+"), TRUE ~ "")) %>%
     select(-tox_final) %>%
+    # Baseline toxicity grade and direction
     group_by(USUBJID, PARAM) %>%
     mutate(
         BTOXGR = case_when(
@@ -474,15 +483,15 @@ adlbsi <- raw$lb %>%
         TRTP = TRT01P,
         SRCDOM = "LB",
         SRCSEQ = LBSEQ) %>%
-    arrange(USUBJID, PARAMCD, ADT, SRCSEQ)
+    arrange(USUBJID, PARAMCD, ADT, SRCSEQ) 
 
-attr(adlbsi$ADT, "format.sas") <- "IS8601DA"
+adlbsi <- adlbsi %>% select(names(val$adlbsi))
 
-# ADaM ADTTE Dataset --------------------------------------------------------
+# ADaM ADTTE --------------------------------------------------------------
+# Data cutoff date for analysis
 cutoff <- ymd("2010-05-15")
 
-adtte <- adsl %>% mutate(TRTP = TRT01P, STARTDT = RANDDT)
-
+# Last tumor assessment date per subject (max TUDTC with non-NA result)
 tu_dates <- raw$tu %>%
     filter(!is.na(TUORRES), TUORRES != "") %>%
     mutate(TUDTC = as.Date(TUDTC)) %>%
@@ -490,8 +499,7 @@ tu_dates <- raw$tu %>%
     group_by(USUBJID) %>%
     summarise(TUMLDT = max(TUDTC), .groups = "drop")
 
-adtte <- adtte %>% left_join(tu_dates, by = "USUBJID")
-
+# First progression date per subject 
 fpdt <- raw$tu %>%
     filter(substr(TUORRES, 1, 2) == "NL") %>%
     mutate(TUDTC = as.Date(TUDTC)) %>%
@@ -499,43 +507,59 @@ fpdt <- raw$tu %>%
     group_by(USUBJID) %>%
     summarise(FPDDT = min(TUDTC), .groups = "drop")
 
-adtte <- adtte %>% left_join(fpdt, by = "USUBJID")
-
+# CA-125 lab data for time-to-event: filter to CA-125 responders,
+# post-treatment, within cutoff; LBORRES converted to numeric
 lb_tte <- raw$lb %>%
     mutate(LBDTC = as.Date(LBDTC), LBORRES = as.numeric(LBORRES), LBORNRHI = as.numeric(LBORNRHI)) %>%
     inner_join(adsl %>% select(USUBJID, TRTSDT, CA125FL), by = "USUBJID") %>%
     filter(CA125FL == "Y", LBTESTCD == "CA125", !is.na(LBDTC),
         LBDTC >= TRTSDT, LBDTC <= cutoff)
 
-adtte <- adtte %>%
+adtte <- adsl %>% mutate(TRTP = TRT01P, STARTDT = RANDDT) %>%
+    left_join(tu_dates, by = "USUBJID") %>%
+    left_join(fpdt, by = "USUBJID") %>%
+    # First CA-125 elevation date
     left_join(
         lb_tte %>% filter(!is.na(LBORRES), !is.na(LBORNRHI), LBORRES >= 2 * LBORNRHI) %>%
             arrange(USUBJID, LBDTC) %>%
             group_by(USUBJID) %>%
-            filter({ d <- unique(LBDTC); length(d) >= 2 && min(abs(outer(as.numeric(d), as.numeric(d), `-`))[upper.tri(diag(length(d)))]) >= 7 }) %>%
+            filter({d <- unique(LBDTC)
+                length(d) >= 2 && min(abs(outer(d, d, `-`))[upper.tri(diag(length(d)))]) >= 7}) %>%
             summarise(FCA125DT = min(LBDTC), .groups = "drop"), by = "USUBJID") %>%
+    # Last CA-125 assessment date
     left_join(
-        lb_tte %>% group_by(USUBJID) %>% summarise(LCA125DT = max(LBDTC), .groups = "drop"),
+        raw$lb %>%
+            mutate(LBDTC = as.Date(LBDTC)) %>%
+            inner_join(adsl %>% select(USUBJID, TRTSDT, CA125FL), by = "USUBJID") %>%
+            filter(CA125FL == "Y", LBTESTCD == "CA125", !is.na(LBDTC),
+                !is.na(LBORRES), LBORRES != "",
+                LBDTC >= TRTSDT, LBDTC <= cutoff) %>%
+            group_by(USUBJID) %>% summarise(LCA125DT = max(LBDTC), .groups = "drop"),
         by = "USUBJID")
 
+# Cross with time-to-event parameters
 adtte <- adtte %>%
     cross_join(tibble(
         PARAMCD = c("TTPFS", "TTPFS125", "TTOS"),
         PARAM = c("TIME TO PROGRESSION FREE SURVIVAL (month)",
-                  "TIME TO PROGRESSION FREE SURVIVAL CA-125 RESPONDER (month)",
-                  "TIME TO OVERALL SURVIVAL (month)"))) %>%
+            "TIME TO PROGRESSION FREE SURVIVAL CA-125 RESPONDER (month)",
+            "TIME TO OVERALL SURVIVAL (month)"))) %>%
+    # Set tumor/CA-125 dates to NA for TTOS
     mutate(
         TUMLDT = as.Date(ifelse(PARAMCD == "TTOS", NA, as.numeric(TUMLDT)), origin = "1970-01-01"),
         FPDDT = as.Date(ifelse(PARAMCD == "TTOS", NA, as.numeric(FPDDT)), origin = "1970-01-01"),
         FCA125DT = as.Date(ifelse(PARAMCD == "TTOS", NA, as.numeric(FCA125DT)), origin = "1970-01-01"),
         LCA125DT = as.Date(ifelse(PARAMCD == "TTOS", NA, as.numeric(LCA125DT)), origin = "1970-01-01")) %>%
+    # Death date adjusted to NA if after cutoff
     mutate(DTHDT_ADJ = as.Date(ifelse(!is.na(DTHDT) & DTHDT <= cutoff, DTHDT, NA))) %>%
+    # Disposition end date and reason for censor classification
     left_join(
         raw$ds %>% filter(DSCAT == "DISPOSITION EVENT", DSSCAT %in% c("STUDY PERIOD", "FOLLOW-UP")) %>%
             mutate(DSSTDTC = as.Date(DSSTDTC)) %>% filter(!is.na(DSSTDTC)) %>%
             group_by(USUBJID) %>% slice_max(DSSTDTC, n = 1, with_ties = FALSE) %>% ungroup() %>%
             select(USUBJID, DS_ADT = DSSTDTC, DSDECOD), by = "USUBJID")
 
+# Derive ADT, FPD125DT, CNSR, and EVNTDESC
 adtte <- adtte %>%
     mutate(
         ADT = case_when(
@@ -561,12 +585,14 @@ adtte <- adtte %>%
             PARAMCD == "TTPFS125" & !is.na(LCA125DT) ~ LCA125DT,
             PARAMCD == "TTPFS125" ~ STARTDT,
             TRUE ~ STARTDT),
+        # First progression date for CA-125 responders
         FPD125DT = as.Date(
             case_when(
                 CA125FL == "Y" & !is.na(FPDDT) & !is.na(FCA125DT) ~ as.numeric(pmin(FPDDT, FCA125DT)),
                 CA125FL == "Y" & !is.na(FPDDT) ~ as.numeric(FPDDT),
                 CA125FL == "Y" & !is.na(FCA125DT) ~ as.numeric(FCA125DT)),
             origin = "1970-01-01")) %>%
+    # Temporary flags for CNSR computation
     mutate(
         evt = !is.na(DTHDT) & DTHDT <= cutoff,
         sponsor = DSDECOD == "STUDY TERMINATED BY SPONSOR",
@@ -587,10 +613,11 @@ adtte <- adtte %>%
             PARAMCD == "TTPFS" & is.na(FPDDT) & is.na(DTHDT_ADJ) & !is.na(TUMLDT) ~ 1,
             PARAMCD == "TTPFS" ~ 2,
             PARAMCD == "TTPFS125" & f_c125 ~ 0,
-            PARAMCD == "TTPFS125" & !is.na(TUMLDT) & (is.na(LCA125DT) | TUMLDT >= LCA125DT) ~ 1,
+            PARAMCD == "TTPFS125" & !is.na(TUMLDT) & (is.na(LCA125DT) | TUMLDT >= LCA125DT) ~ 1, 
             PARAMCD == "TTPFS125" & !is.na(LCA125DT) ~ 2,
             PARAMCD == "TTPFS125" ~ 3,
             TRUE ~ NA_real_),
+        CNSR = coalesce(CNSR, 0),
         EVNTDESC = case_when(
             PARAMCD == "TTOS" & CNSR == 0 ~ "EVENT: DEATH DUE TO ANY CAUSE",
             PARAMCD == "TTOS" & CNSR == 1 ~ "CENSORED AS OF DATE SPONSOR DECIDED TO TERMINATE THE STUDY",
@@ -618,27 +645,17 @@ adtte <- adtte %>%
             PARAMCD == "TTPFS125" ~ "CENSORED AS OF RANDOMIZATION DATE",
             TRUE ~ NA_character_)) %>%
     select(-DS_ADT, -DSDECOD, -evt, -sponsor, -ltofu, -wdraw, -other, -prog, -f_evt, -f_c125) %>%
+    # Analysis value in months
     mutate(AVAL = as.numeric(ADT - STARTDT + 1) / 30.4375) %>%
     filter(!(PARAMCD == "TTPFS125" & CA125FL != "Y")) %>%
     arrange(USUBJID, PARAMCD)
 
-for (col in c("TUMLDT", "FPDDT", "FPD125DT", "FCA125DT", "LCA125DT", "ADT",
-              "STARTDT", "TRTSDT", "TRTEDT", "STDSDT", "STDEDT", "RANDDT", "DTHDT")) {
-    attr(adtte[[col]], "format.sas") <- "IS8601DA"}
+adtte <- adtte %>% select(names(val$adtte))
 
-adtte <- adtte %>%
-    select(
-        SUBJID, AGE, AGEU, AGEGR1, AGEGR1N, SEX, RACE, ETHNIC,
-        ITTFL, SAFFL, EFFL, CA125FL, TRTSDT, TRTEDT, STDSDT,
-        STDEDT, RANDDT, DTHDT, DTHPER, BECOG, REMISS, REMISSN,
-        RSP125, HPATHTYP, HSUBTYP, TUMLDT, FPDDT, FPD125DT,
-        FCA125DT, LCA125DT, PARAM, PARAMCD, STARTDT, ADT,
-        CNSR, EVNTDESC, AVAL, STUDYID, USUBJID, SITEID,
-        INVNAM, INVID, COUNTRY, TRT01P, TRT01PN, TRT01A, TRT01AN, TRTP)
-
-# ADaM ADEX Dataset ---------------------------------------------------------
+# ADaM ADEX ---------------------------------------------------------------
 adex <- adsl %>% mutate(TRTP = TRT01P)
 
+# Treatment duration from first to last dose
 txdur <- adex %>%
     mutate(
         PARAM = "Duration of Treatment Received (months)",
@@ -647,12 +664,14 @@ txdur <- adex %>%
             (as.numeric(TRTEDT) - as.numeric(TRTSDT) + 1) / 30.4375),
         DTYPE = "DIFFERENCE")
 
+# Total capsules taken from DA
 da_v <- raw$da %>%
     distinct(USUBJID, DARFTDTC, DADTC, DATESTCD, DAORRES, .keep_all = TRUE) %>%
     filter(DATESTCD == "TAKENAMT") %>%
     group_by(USUBJID) %>%
     summarise(AVAL = sum(DASTRESN, na.rm = TRUE), .groups = "drop")
 
+# Total capsules
 cumcap <- adex %>%
     left_join(da_v, by = "USUBJID") %>%
     mutate(
@@ -661,6 +680,7 @@ cumcap <- adex %>%
         AVAL = case_when(is.na(AVAL) ~ 0, TRUE ~ AVAL),
         DTYPE = "SUM")
 
+# Total cumulative dose in grams
 cumdose <- cumcap %>%
     mutate(
         PARAM = "Total Cumulative Dose (g)",
@@ -668,6 +688,7 @@ cumdose <- cumcap %>%
         AVAL = case_when(!is.na(AVAL) ~ (AVAL * 150) / 1000),
         DTYPE = "SUM")
 
+# Dose intensity percentage
 intens <- cumcap %>%
     mutate(
         PARAM = "Dose Intensity (%)",
@@ -677,23 +698,14 @@ intens <- cumcap %>%
         DTYPE = "PERCENTAGE") %>%
     select(-DAYS)
 
+# Combine all exposure parameters
 adex <- bind_rows(txdur, cumcap, cumdose, intens) %>%
     arrange(USUBJID, PARAMCD)
 
-for (v in c("RANDDT", "TRTSDT", "TRTEDT")) {
-    attr(adex[[v]], "format.sas") <- "IS8601DA"}
+adex <- adex %>% select(names(val$adex))
 
-adex <- adex %>%
-    select(SUBJID, AGE, AGEU, AGEGR1, AGEGR1N, SEX, RACE, ETHNIC,
-           RANDDT, REMISS, REMISSN, ITTFL, SAFFL, EFFL, CA125FL,
-           TRTDCFL, COMPLFL, STDDCFL, SFUDCFL, SFUFL,
-           TRTSDT, TRTEDT, FPDUR, PARAM, PARAMCD, AVAL, DTYPE,
-           STUDYID, USUBJID, SITEID, INVNAM, INVID, COUNTRY,
-           TRT01P, TRT01PN, TRT01A, TRT01AN, TRTP)
-
-
-#Comparing with validation datasets ---------------------------------------
-# Copy column attributes (labels/formats) from validation data to derived data
+# Comparing with validation datasets --------------------------------------
+# Copy column attributes  from validation data to derived data
 for (col in colnames(val$adsl)) {
     if (col %in% colnames(adsl)) {
         attributes(adsl[[col]]) <- attributes(val$adsl[[col]])}}
@@ -710,34 +722,36 @@ for (col in colnames(val$adex)) {
     if (col %in% colnames(adex)) {
         attributes(adex[[col]]) <- attributes(val$adex[[col]])}}
 
-# Copy data frame attributes
+# Copy data frame attributes 
 comment(adsl) <- comment(val$adsl)
 comment(adae) <- comment(val$adae)
+attributes(adae) <- attributes(val$adae)
 comment(adlbsi) <- comment(val$adlbsi)
 comment(adtte) <- comment(val$adtte)
 comment(adex) <- comment(val$adex)
 
-# ADSL
+# Run comparisons
+# ADSL - IDENTICAL
 identical(adsl, val$adsl)
 all.equal(adsl, val$adsl)
 anti_join(adsl, val$adsl, by = "USUBJID")
 anti_join(val$adsl, adsl, by = "USUBJID")
-# ADAE
+# ADAE - IDENTICAL
 identical(adae, val$adae)
 all.equal(adae, val$adae)
 anti_join(adae, val$adae, by = "USUBJID")
 anti_join(val$adae, adae, by = "USUBJID")
-# ADLBSI
+# ADLBSI - IDENTICAL
 identical(adlbsi, val$adlbsi)
 all.equal(adlbsi, val$adlbsi)
 anti_join(adlbsi, val$adlbsi, by = "USUBJID")
 anti_join(val$adlbsi, adlbsi, by = "USUBJID")
-# ADTTE
+# ADTTE - IDENTICAL
 identical(adtte, val$adtte)
 all.equal(adtte, val$adtte)
 anti_join(adtte, val$adtte, by = "USUBJID")
 anti_join(val$adtte, adtte, by = "USUBJID")
-# ADEX
+# ADEX - IDENTICAL
 identical(adex, val$adex)
 all.equal(adex, val$adex)
 anti_join(adex, val$adex, by = "USUBJID")
