@@ -1,3 +1,11 @@
+---
+title: "Project 2-B"
+author: "An Vu"
+date: "2026-06-26"
+output: html_document
+---
+
+```{r}
 # Load packages -----------------------------------------------------------
 library(dplyr)
 library(tidyr)
@@ -58,7 +66,9 @@ val <- list(
     adlbsi = read_xpt("ADaM xpt/ADLBSI.xpt"),
     adtte = read_xpt("ADaM xpt/ADTTE.xpt"),
     adex = read_xpt("ADaM xpt/ADEX.xpt"))
+```
 
+```{r}
 # ADaM ADSL ---------------------------------------------------------------
 adsl <- raw$dm %>%
     # Derive actual treatment from EX
@@ -312,7 +322,9 @@ adsl <- raw$dm %>%
         TRUE ~ ""))
 
 adsl <- adsl %>% select(names(val$adsl))
+```
 
+```{r}
 # ADaM ADAE ---------------------------------------------------------------
 # Pivot SUPPAE supplemental data wide by QNAM
 suppae_w <- raw$suppae %>%
@@ -374,8 +386,10 @@ adae <- adae %>%
     AEHDTC = case_when(is.na(AEHDTC) ~ "", TRUE ~ as.character(AEHDTC)))
 
 adae <- adae %>% select(names(val$adae))
+```
 
-# ADaM ADLBSI -------------------------------------------------------------
+```{r}
+ ADaM ADLBSI -------------------------------------------------------------
 # Read supplemental lab toxicity grade from SUPPLE
 tox <- raw$supplb %>%
     filter(QNAM == "LBTOXGR1") %>%
@@ -486,7 +500,9 @@ adlbsi <- raw$lb %>%
     arrange(USUBJID, PARAMCD, ADT, SRCSEQ) 
 
 adlbsi <- adlbsi %>% select(names(val$adlbsi))
+```
 
+```{r}
 # ADaM ADTTE --------------------------------------------------------------
 # Data cutoff date for analysis
 cutoff <- ymd("2010-05-15")
@@ -651,7 +667,9 @@ adtte <- adtte %>%
     arrange(USUBJID, PARAMCD)
 
 adtte <- adtte %>% select(names(val$adtte))
+```
 
+```{r}
 # ADaM ADEX ---------------------------------------------------------------
 adex <- adsl %>% mutate(TRTP = TRT01P)
 
@@ -703,8 +721,10 @@ adex <- bind_rows(txdur, cumcap, cumdose, intens) %>%
     arrange(USUBJID, PARAMCD)
 
 adex <- adex %>% select(names(val$adex))
+```
 
-# Comparing with validation datasets --------------------------------------
+```{r}
+ Comparing with validation datasets --------------------------------------
 # Copy column attributes  from validation data to derived data
 for (col in colnames(val$adsl)) {
     if (col %in% colnames(adsl)) {
@@ -756,3 +776,5 @@ identical(adex, val$adex)
 all.equal(adex, val$adex)
 anti_join(adex, val$adex, by = "USUBJID")
 anti_join(val$adex, adex, by = "USUBJID")
+```
+
