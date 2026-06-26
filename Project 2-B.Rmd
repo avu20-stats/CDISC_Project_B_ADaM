@@ -389,7 +389,7 @@ adae <- adae %>% select(names(val$adae))
 ```
 
 ```{r}
- ADaM ADLBSI -------------------------------------------------------------
+# ADaM ADLBSI -------------------------------------------------------------
 # Read supplemental lab toxicity grade from SUPPLE
 tox <- raw$supplb %>%
     filter(QNAM == "LBTOXGR1") %>%
@@ -724,7 +724,7 @@ adex <- adex %>% select(names(val$adex))
 ```
 
 ```{r}
- Comparing with validation datasets --------------------------------------
+# Comparing with validation datasets --------------------------------------
 # Copy column attributes  from validation data to derived data
 for (col in colnames(val$adsl)) {
     if (col %in% colnames(adsl)) {
