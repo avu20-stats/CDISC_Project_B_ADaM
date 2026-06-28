@@ -7,7 +7,7 @@ library(haven)
 library(stringr)
 library(readxl)
 
-# Read raw SDTM datasets into a named list --------------------------------
+# Read SDTM datasets into a list ------------------------------------------
 raw <- list(
     ae = read_xpt("SDTM xpt/AE.xpt"),
     cm = read_xpt("SDTM xpt/CM.xpt"),
