@@ -1,4 +1,4 @@
-# CDISC ADaM Creation & Validation - Project 2-B
+# CDISC ADaM Creation & Validation - Project B
 
 Derives 5 ADaM datasets (ADSL, ADAE, ADLBSI, ADTTE, ADEX) from SDTM source data for study **CMP135**, and validates the output against gold-standard reference XPT files.
 
@@ -7,9 +7,9 @@ Derives 5 ADaM datasets (ADSL, ADAE, ADLBSI, ADTTE, ADEX) from SDTM source data 
 ```
 SDTM xpt/              # Source SDTM XPT files (SAS .xpt)
 ADaM xpt/              # Reference ADaM XPT files for validation
-Project 2-B.R          # Main R script (all derivations + validation)
-Project 2-B.Rmd        # R Markdown version (knits to HTML)
-Project 2-B.html       # Compiled report
+Project B.R            # Main R script (all derivations + validation)
+Project B.Rmd          # R Markdown version (knits to HTML)
+Project B.html         # Compiled report
 ```
 
 ## ADaM Datasets
@@ -24,7 +24,7 @@ Project 2-B.html       # Compiled report
 
 ## Usage
 
-Open and run `Project 2-B.R` in RStudio. Each derived dataset is compared against the reference XPT files using `identical()`, `all.equal()`, and `anti_join()`.
+Open and run `Project B.R` in RStudio. Each derived dataset is compared against the reference XPT files using `identical()`, `all.equal()`, and `anti_join()`.
 
 ## Requirements
 
