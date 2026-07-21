@@ -19,7 +19,7 @@ Project B.html         # Compiled report
 | **ADSL** | Subject-Level Analysis - population flags (ITT, SAF, EFF, CA125), treatment, disposition, prior therapy, baseline measures |
 | **ADAE** | Adverse Events - treatment-emergent flag, severity, relationship, action taken |
 | **ADLBSI** | Lab Safety (SI) - chemistry, hematology, urinalysis with baseline, change, toxicity grades |
-| **ADTTE** | Time-to-Event - progression-free survival (TTPFS), CA-125 responder PFS (TTPFS125), overall survival (TTOS) |
+| **ADTTE** | Time-to-Event - progression-free survival (TTPFS), CA125 responder PFS (TTPFS125), overall survival (TTOS) |
 | **ADEX** | Exposure - treatment duration, cumulative capsules/dose, dose intensity |
 
 ## Usage
